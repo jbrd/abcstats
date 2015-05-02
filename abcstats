@@ -1,0 +1,162 @@
+#!/usr/bin/env python
+
+'''abcstats - a script for accumulating statistics from Alembic archives.'''
+
+import os
+import sys
+
+def ensure_alembic_is_present( ):
+
+	'''Attempts to import the alembic python module, to ensure that it is present on the user's system.
+	Note that this function also runs an additional test to ensure that if 'alembic' is present, that it
+	is actually the geometry caching module, and NOT the database migrations tool with the same name!
+
+	If successful, this function will exit cleanly. Otherwise, an ImportError will be raised.'''
+
+	try:
+		import alembic
+	except ImportError:
+		raise ImportError( "Failed to import the 'alembic' python module. Is it present on your system?" )
+
+	try:
+		import alembic.Abc
+	except ImportError:
+		raise ImportError(
+			"An 'alembic' python module is present on your system but the 'alembic.Abc' module isn't. " +
+			"Please make sure the 'alembic' on your system is indeed the geometry caching library"
+		)
+
+
+def traverse_array_property( parent, parent_path, statistics ):
+
+	'''Traverses the array property samples to compute the sample with the largest array length, and
+	then uses this length to update the given statistics dictionary'''
+
+	max_length = 0
+	for sample in parent.samples:
+		max_length = max( max_length, len( sample ) )
+	statistics[ parent_path ] = statistics.get( parent_path, 0 ) + max_length
+
+
+def traverse_compound_property( parent, parent_path, statistics ):
+
+	'''Traverses the properties of the given alembic file'''
+
+	for property_index in range( parent.getNumProperties( ) ):
+		property = parent.getProperty( property_index )
+		schema = property.getMetaData( ).get( 'schema' )
+		if schema:
+			statistics[ schema ] = statistics.get( schema, 0 ) + 1
+		property_path = ''.join( ( parent_path, '/' if parent_path else '', schema if schema else property.getName() ) )
+		if property.isCompound( ):
+			traverse_compound_property( property, property_path, statistics )
+		elif property.isArray( ):
+			traverse_array_property( property, property_path, statistics )
+
+
+def traverse_archive( archive, statistics ):
+
+	'''Traverse the given archive structure, accumulating statistics into the given statistics dictionary'''
+
+	num_objects = 0
+	top = archive.getTop( )
+	working_set = [ top ]
+	while working_set:
+		current_object = working_set.pop(0)
+		working_set.extend( current_object.children )
+		statistics['IObject Count (incl. top)'] = statistics.get( 'IObject Count (incl. top)', 0 ) + 1
+		if current_object != top:
+			statistics['IObject Count (excl. top)'] = statistics.get( 'IObject Count (excl. top)', 0 ) + 1
+		traverse_compound_property( current_object.getProperties( ), '', statistics )
+
+
+def visit_file( file_path, statistics ):
+
+	'''Visit a single alembic file, accumulating the statistics into the given statistics dictionary'''
+
+	import alembic.Abc
+	if not os.path.exists( file_path ):
+		sys.stderr.write( "Skipping '%s' - file not found\n" % ( file_path ) )
+	try:
+		archive = alembic.Abc.IArchive( file_path )
+	except RuntimeError:
+		sys.stderr.write( "Skipping '%s' - failed to read alembic archive\n" % ( file_path ) )
+		return
+	statistics[ 'File Count' ] = statistics.get( 'File Count', 0 ) + 1
+	traverse_archive( archive, statistics )
+
+
+def print_results( statistics ):
+
+	'''Prints the given statistics dictionary to sys.stdout'''
+
+	for stat in sorted( statistics ):
+		sys.stdout.write( 'Total %s: %s\n' % ( stat, statistics[stat] ) )
+
+
+def visit_files( arguments ):
+
+	'''Visit each of the given alembic files, accumulating the statistics for each file.'''
+
+	statistics = { }
+	for file_path in arguments.file_path:
+		visit_file( file_path, statistics )
+	print_results( statistics )
+
+
+def parse_arguments( argument_list ):
+
+	'''Takes a list of strings (such as the program arguments passed over the command-line) and converts
+	them into an arguments object that can be accepted by the run function'''
+
+	import argparse
+	parser = argparse.ArgumentParser( )
+	parser.add_argument( 'file_path', nargs='*', help='One or more paths to alembic files to gather stats from. If not specified, the list of files is read from stdin' )
+	parser.add_argument( '-d', '--distinct', dest='distinct', default=False, action='store_true', help='Filter out duplicate file paths (off by default)' )
+	return parser.parse_args()
+
+
+def get_file_paths_from_stdin( arguments ):
+
+	'''If no file paths were given in the command line arguments, this function will update
+	the given arguments object with a list of files read from stdin (1 file per line)'''
+
+	try:
+		sys.stdout.write( 'Reading list of files from stdin... ' )
+		for line in sys.stdin:
+			arguments.file_path.append( line.strip() )
+		sys.stdout.write( 'Done' )
+	finally:
+		sys.stdout.write( '\n' )
+
+
+def main( argument_list ):
+
+	'''The application entry point.'''
+
+	# Ensure alembic is present on the system
+	try:
+		ensure_alembic_is_present( )
+	except ImportError, e:
+		sys.stderr.write( str( e ) + '\n' )
+		return -1
+
+	# Parse the argument list
+	arguments = parse_arguments( argument_list )
+
+	# Update the arguments with list of files from stdin if no file paths were provided
+	if not arguments.file_path:
+		get_file_paths_from_stdin( arguments )
+
+	# Filter out duplicate file paths if requested
+	if arguments.distinct:
+		arguments.file_path = set( arguments.file_path )
+
+	# Now gather stats on the given alembic files
+	visit_files( arguments )
+	return 0
+
+
+# If we are running this script directly, invoke the main function
+if __name__ == '__main__':
+	sys.exit( main( sys.argv ) )
