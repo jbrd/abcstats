@@ -2,7 +2,7 @@
 
 Given one or more Alembic archives, this script will traverse each archive's objects and properties, and accumulate the following statistics:
 
-* Number of files
+* Number of files and total file size in bytes
 * Number of IObjects
 * Total occurrences of each schema
 * Total array length of all array properties (keyed on schema name + property path)
@@ -22,6 +22,7 @@ The script will produce some output like this:
     Total AbcGeom_PolyMesh_v1/uv/.vals: 2288
     Total AbcGeom_Xform_v3: 18
     Total File Count: 9
+    Total File Size (Bytes): 4892874
     Total IObject Count (excl. top): 36
     Total IObject Count (incl. top): 45
 

@@ -83,6 +83,7 @@ def visit_file( file_path, statistics ):
 		sys.stderr.write( "Skipping '%s' - failed to read alembic archive\n" % ( file_path ) )
 		return
 	statistics[ 'File Count' ] = statistics.get( 'File Count', 0 ) + 1
+	statistics[ 'File Size (Bytes)' ] = statistics.get( 'File Size (Bytes)', 0 ) + os.stat( file_path ).st_size
 	traverse_archive( archive, statistics )
 
 
